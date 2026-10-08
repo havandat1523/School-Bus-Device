@@ -1,0 +1,262 @@
+/* USER CODE BEGIN Header */
+/**
+  ******************************************************************************
+  * File Name          : freertos.c
+  * Description        : Code for freertos applications
+  ******************************************************************************
+  * @attention
+  *
+  * Copyright (c) 2026 STMicroelectronics.
+  * All rights reserved.
+  *
+  * This software is licensed under terms that can be found in the LICENSE file
+  * in the root directory of this software component.
+  * If no LICENSE file comes with this software, it is provided AS-IS.
+  *
+  ******************************************************************************
+  */
+/* USER CODE END Header */
+
+/* Includes ------------------------------------------------------------------*/
+#include "FreeRTOS.h"
+#include "task.h"
+#include "main.h"
+#include "cmsis_os.h"
+
+/* Private includes ----------------------------------------------------------*/
+/* USER CODE BEGIN Includes */
+
+/* USER CODE END Includes */
+
+/* Private typedef -----------------------------------------------------------*/
+/* USER CODE BEGIN PTD */
+
+/* USER CODE END PTD */
+
+/* Private define ------------------------------------------------------------*/
+/* USER CODE BEGIN PD */
+
+/* USER CODE END PD */
+
+/* Private macro -------------------------------------------------------------*/
+/* USER CODE BEGIN PM */
+
+/* USER CODE END PM */
+
+/* Private variables ---------------------------------------------------------*/
+/* USER CODE BEGIN Variables */
+
+/* USER CODE END Variables */
+/* Definitions for UART_Pi */
+osThreadId_t UART_PiHandle;
+const osThreadAttr_t UART_Pi_attributes = {
+  .name = "UART_Pi",
+  .stack_size = 512 * 4,
+  .priority = (osPriority_t) osPriorityAboveNormal,
+};
+/* Definitions for CAN_Rx */
+osThreadId_t CAN_RxHandle;
+const osThreadAttr_t CAN_Rx_attributes = {
+  .name = "CAN_Rx",
+  .stack_size = 512 * 4,
+  .priority = (osPriority_t) osPriorityHigh,
+};
+/* Definitions for GNSS_Parse */
+osThreadId_t GNSS_ParseHandle;
+const osThreadAttr_t GNSS_Parse_attributes = {
+  .name = "GNSS_Parse",
+  .stack_size = 512 * 4,
+  .priority = (osPriority_t) osPriorityNormal,
+};
+/* Definitions for Audio_DFPlayer */
+osThreadId_t Audio_DFPlayerHandle;
+const osThreadAttr_t Audio_DFPlayer_attributes = {
+  .name = "Audio_DFPlayer",
+  .stack_size = 384 * 4,
+  .priority = (osPriority_t) osPriorityNormal,
+};
+/* Definitions for Heartbeat_Mon */
+osThreadId_t Heartbeat_MonHandle;
+const osThreadAttr_t Heartbeat_Mon_attributes = {
+  .name = "Heartbeat_Mon",
+  .stack_size = 256 * 4,
+  .priority = (osPriority_t) osPriorityLow,
+};
+/* Definitions for queueCanToPi */
+osMessageQueueId_t queueCanToPiHandle;
+const osMessageQueueAttr_t queueCanToPi_attributes = {
+  .name = "queueCanToPi"
+};
+/* Definitions for queueAudio */
+osMessageQueueId_t queueAudioHandle;
+const osMessageQueueAttr_t queueAudio_attributes = {
+  .name = "queueAudio"
+};
+
+/* Private function prototypes -----------------------------------------------*/
+/* USER CODE BEGIN FunctionPrototypes */
+
+/* USER CODE END FunctionPrototypes */
+
+void StartUartPiTask(void *argument);
+void StartCanRxTask(void *argument);
+void StartGnssParseTask(void *argument);
+void StartAudioTask(void *argument);
+void StartHeartbeatMonTask(void *argument);
+
+void MX_FREERTOS_Init(void); /* (MISRA C 2004 rule 8.1) */
+
+/**
+  * @brief  FreeRTOS initialization
+  * @param  None
+  * @retval None
+  */
+void MX_FREERTOS_Init(void) {
+  /* USER CODE BEGIN Init */
+
+  /* USER CODE END Init */
+
+  /* USER CODE BEGIN RTOS_MUTEX */
+  /* add mutexes, ... */
+  /* USER CODE END RTOS_MUTEX */
+
+  /* USER CODE BEGIN RTOS_SEMAPHORES */
+  /* add semaphores, ... */
+  /* USER CODE END RTOS_SEMAPHORES */
+
+  /* USER CODE BEGIN RTOS_TIMERS */
+  /* start timers, add new ones, ... */
+  /* USER CODE END RTOS_TIMERS */
+
+  /* Create the queue(s) */
+  /* creation of queueCanToPi */
+  queueCanToPiHandle = osMessageQueueNew (16, 16, &queueCanToPi_attributes);
+
+  /* creation of queueAudio */
+  queueAudioHandle = osMessageQueueNew (8, sizeof(uint16_t), &queueAudio_attributes);
+
+  /* USER CODE BEGIN RTOS_QUEUES */
+  /* add queues, ... */
+  /* USER CODE END RTOS_QUEUES */
+
+  /* Create the thread(s) */
+  /* creation of UART_Pi */
+  UART_PiHandle = osThreadNew(StartUartPiTask, NULL, &UART_Pi_attributes);
+
+  /* creation of CAN_Rx */
+  CAN_RxHandle = osThreadNew(StartCanRxTask, NULL, &CAN_Rx_attributes);
+
+  /* creation of GNSS_Parse */
+  GNSS_ParseHandle = osThreadNew(StartGnssParseTask, NULL, &GNSS_Parse_attributes);
+
+  /* creation of Audio_DFPlayer */
+  Audio_DFPlayerHandle = osThreadNew(StartAudioTask, NULL, &Audio_DFPlayer_attributes);
+
+  /* creation of Heartbeat_Mon */
+  Heartbeat_MonHandle = osThreadNew(StartHeartbeatMonTask, NULL, &Heartbeat_Mon_attributes);
+
+  /* USER CODE BEGIN RTOS_THREADS */
+  /* add threads, ... */
+  /* USER CODE END RTOS_THREADS */
+
+  /* USER CODE BEGIN RTOS_EVENTS */
+  /* add events, ... */
+  /* USER CODE END RTOS_EVENTS */
+
+}
+
+/* USER CODE BEGIN Header_StartUartPiTask */
+/**
+  * @brief  Function implementing the UART_Pi thread.
+  * @param  argument: Not used
+  * @retval None
+  */
+/* USER CODE END Header_StartUartPiTask */
+void StartUartPiTask(void *argument)
+{
+  /* USER CODE BEGIN StartUartPiTask */
+  /* Infinite loop */
+  for(;;)
+  {
+    osDelay(1);
+  }
+  /* USER CODE END StartUartPiTask */
+}
+
+/* USER CODE BEGIN Header_StartCanRxTask */
+/**
+* @brief Function implementing the CAN_Rx thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_StartCanRxTask */
+void StartCanRxTask(void *argument)
+{
+  /* USER CODE BEGIN StartCanRxTask */
+  /* Infinite loop */
+  for(;;)
+  {
+    osDelay(1);
+  }
+  /* USER CODE END StartCanRxTask */
+}
+
+/* USER CODE BEGIN Header_StartGnssParseTask */
+/**
+* @brief Function implementing the GNSS_Parse thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_StartGnssParseTask */
+void StartGnssParseTask(void *argument)
+{
+  /* USER CODE BEGIN StartGnssParseTask */
+  /* Infinite loop */
+  for(;;)
+  {
+    osDelay(1);
+  }
+  /* USER CODE END StartGnssParseTask */
+}
+
+/* USER CODE BEGIN Header_StartAudioTask */
+/**
+* @brief Function implementing the Audio_DFPlayer thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_StartAudioTask */
+void StartAudioTask(void *argument)
+{
+  /* USER CODE BEGIN StartAudioTask */
+  /* Infinite loop */
+  for(;;)
+  {
+    osDelay(1);
+  }
+  /* USER CODE END StartAudioTask */
+}
+
+/* USER CODE BEGIN Header_StartHeartbeatMonTask */
+/**
+* @brief Function implementing the Heartbeat_Mon thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_StartHeartbeatMonTask */
+void StartHeartbeatMonTask(void *argument)
+{
+  /* USER CODE BEGIN StartHeartbeatMonTask */
+  /* Infinite loop */
+  for(;;)
+  {
+    osDelay(1);
+  }
+  /* USER CODE END StartHeartbeatMonTask */
+}
+
+/* Private application code --------------------------------------------------*/
+/* USER CODE BEGIN Application */
+
+/* USER CODE END Application */
+
