@@ -1,0 +1,1499 @@
+import os
+import sys
+from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
+                             QHBoxLayout, QLabel, QPushButton, QGridLayout, 
+                             QMessageBox, QFrame, QTextEdit, QComboBox, QStackedWidget, QDialog, QProgressBar)
+from PyQt5.QtCore import pyqtSlot, pyqtSignal, Qt, QTimer, QSize
+from PyQt5.QtGui import QImage, QPixmap, QFont, QPainter, QPen, QColor, QIcon
+from config import config
+from services.logger import get_logger
+
+from apps.camera.camera_service import FaceVectorWorker
+
+try:
+    from PyQt5.QtWebEngineWidgets import QWebEngineView
+    WEB_ENGINE_AVAILABLE = True
+except ImportError:
+    WEB_ENGINE_AVAILABLE = False
+
+logger = get_logger("UI")
+
+def make_icon_badge(icon_filename, default_text, is_active=False):
+    frame = QFrame()
+    layout = QHBoxLayout(frame)
+    layout.setContentsMargins(6, 4, 10, 4)
+    layout.setSpacing(6)
+    
+    icon_path = os.path.join(config.BASE_DIR, "image", icon_filename)
+    if os.path.exists(icon_path):
+        icon_lbl = QLabel()
+        pix = QPixmap(icon_path).scaledToHeight(20, Qt.SmoothTransformation)
+        icon_lbl.setPixmap(pix)
+        layout.addWidget(icon_lbl)
+        
+    txt_lbl = QLabel(default_text)
+    txt_lbl.setFont(QFont("Arial", 10, QFont.Bold))
+    layout.addWidget(txt_lbl)
+    
+    set_badge_active(frame, txt_lbl, is_active)
+    return frame, txt_lbl
+
+def set_badge_active(frame, txt_lbl, is_active, text=None):
+    if text:
+        txt_lbl.setText(text)
+    if is_active:
+        frame.setStyleSheet("QFrame { background-color: #ffffff; border: 1px solid #86efac; border-radius: 8px; padding: 2px 6px; }")
+        txt_lbl.setStyleSheet("color: #16a34a; font-weight: bold; font-size: 11px;")
+    else:
+        frame.setStyleSheet("QFrame { background-color: #ffffff; border: 1px solid #fca5a5; border-radius: 8px; padding: 2px 6px; }")
+        txt_lbl.setStyleSheet("color: #dc2626; font-weight: bold; font-size: 11px;")
+
+# Custom Dialog Popup for Slide 10: Cannot Logout Warning
+class CannotLogoutDialog(QDialog):
+    def __init__(self, reason_text, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("KHÔNG THỂ ĐĂNG XUẤT")
+        self.setFixedSize(540, 340)
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(15, 15, 15, 15)
+        
+        container = QFrame()
+        container.setStyleSheet("""
+            QFrame {
+                background-color: #ffffff;
+                border: 3px solid #e74c3c;
+                border-radius: 20px;
+            }
+        """)
+        c_layout = QVBoxLayout(container)
+        c_layout.setContentsMargins(25, 20, 25, 20)
+        
+        icon_lbl = QLabel("[ ! ]")
+        icon_lbl.setAlignment(Qt.AlignCenter)
+        icon_lbl.setFont(QFont("Arial", 32, QFont.Bold))
+        icon_lbl.setStyleSheet("color: #dc2626; border: none;")
+        c_layout.addWidget(icon_lbl)
+        
+        title_lbl = QLabel("KHÔNG THỂ ĐĂNG XUẤT")
+        title_lbl.setAlignment(Qt.AlignCenter)
+        title_lbl.setFont(QFont("Segoe UI", 16, QFont.Bold))
+        title_lbl.setStyleSheet("color: #111111; border: none; margin-bottom: 5px;")
+        c_layout.addWidget(title_lbl)
+        
+        detail_box = QFrame()
+        detail_box.setStyleSheet("background-color: #fdf2f2; border: 1px solid #f8d7da; border-radius: 10px; padding: 10px;")
+        d_layout = QVBoxLayout(detail_box)
+        
+        warn_txt = QLabel(f"<b>Cảnh báo an toàn (Đặc tả 2.8):</b><br>{reason_text}")
+        warn_txt.setWordWrap(True)
+        warn_txt.setFont(QFont("Segoe UI", 11))
+        warn_txt.setStyleSheet("color: #c0392b; border: none;")
+        d_layout.addWidget(warn_txt)
+        
+        c_layout.addWidget(detail_box)
+        
+        btn = QPushButton("ĐÃ HIỂU - KIỂM TRA XE NGAY")
+        btn.setFont(QFont("Segoe UI", 12, QFont.Bold))
+        btn.setStyleSheet("""
+            QPushButton {
+                background-color: #1e293b;
+                color: #ffffff;
+                border: none;
+                border-radius: 12px;
+                padding: 12px;
+                margin-top: 10px;
+            }
+            QPushButton:hover { background-color: #334155; }
+        """)
+        btn.clicked.connect(self.accept)
+        c_layout.addWidget(btn)
+        main_layout.addWidget(container)
+
+# Custom Dialog Popup for Slide 12: SOS Alert Triggered
+class SOSAlertDialog(QDialog):
+    def __init__(self, lat, lon, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("CẢNH BÁO SOS")
+        self.setFixedSize(560, 380)
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(15, 15, 15, 15)
+        
+        container = QFrame()
+        container.setStyleSheet("""
+            QFrame {
+                background-color: #ffffff;
+                border: 3px solid #dc2626;
+                border-radius: 20px;
+            }
+        """)
+        c_layout = QVBoxLayout(container)
+        c_layout.setContentsMargins(25, 20, 25, 20)
+        
+        icon_lbl = QLabel("[ SOS ]")
+        icon_lbl.setAlignment(Qt.AlignCenter)
+        icon_lbl.setFont(QFont("Arial", 32, QFont.Bold))
+        icon_lbl.setStyleSheet("color: #dc2626; border: none;")
+        c_layout.addWidget(icon_lbl)
+        
+        title_lbl = QLabel("CẢNH BÁO SOS ĐÃ ĐƯỢC KÍCH HOẠT!")
+        title_lbl.setAlignment(Qt.AlignCenter)
+        title_lbl.setFont(QFont("Segoe UI", 15, QFont.Bold))
+        title_lbl.setStyleSheet("color: #dc2626; border: none;")
+        c_layout.addWidget(title_lbl)
+        
+        desc = QLabel("Đã phát loa cảnh báo còi khẩn cấp trên xe & gửi tọa độ GPS khẩn (Type 15 QoS 2) về Server Quản Trị.")
+        desc.setWordWrap(True)
+        desc.setAlignment(Qt.AlignCenter)
+        desc.setFont(QFont("Segoe UI", 10))
+        desc.setStyleSheet("color: #4b5563; border: none; margin-bottom: 5px;")
+        c_layout.addWidget(desc)
+        
+        detail_box = QFrame()
+        detail_box.setStyleSheet("background-color: #f3f4f6; border: 1px solid #e5e7eb; border-radius: 8px; padding: 10px;")
+        d_layout = QVBoxLayout(detail_box)
+        
+        txt1 = QLabel(f"• Kinh độ/Vĩ độ: {lat:.6f}° N, {lon:.6f}° E")
+        txt2 = QLabel(f"• Biển số xe: {config.VEHICLE_ID} (#BUS04)")
+        txt3 = QLabel("• Trạng thái: Đang phát tín hiệu ưu tiên cao nhất")
+        
+        for t in (txt1, txt2, txt3):
+            t.setFont(QFont("Consolas", 10))
+            t.setStyleSheet("color: #1f2937; border: none;")
+            d_layout.addWidget(t)
+            
+        c_layout.addWidget(detail_box)
+        
+        btn = QPushButton("HỦY CẢNH BÁO SOS")
+        btn.setFont(QFont("Segoe UI", 12, QFont.Bold))
+        btn.setStyleSheet("""
+            QPushButton {
+                background-color: #dc2626;
+                color: #ffffff;
+                border: none;
+                border-radius: 12px;
+                padding: 12px;
+                margin-top: 8px;
+            }
+            QPushButton:hover { background-color: #ef4444; }
+        """)
+        btn.clicked.connect(self.accept)
+        c_layout.addWidget(btn)
+        main_layout.addWidget(container)  # FIX: was missing, caused blank dialog & UI freeze
+# Session Check Pending Confirmation Dialog - LOCKED until server responds
+class SessionCheckDialog(QDialog):
+    def __init__(self, driver_name="Tài xế", parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("XÁC NHẬN PHIÊN LÀM VIỆC")
+        self.setFixedSize(520, 280)
+        # Remove close button, make it stay on top and modal
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog | Qt.WindowStaysOnTopHint)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setModal(True)  # Block all other input until server responds
+        
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(15, 15, 15, 15)
+        
+        container = QFrame()
+        container.setStyleSheet("background-color: #ffffff; border: 3px solid #ea580c; border-radius: 20px;")
+        c_layout = QVBoxLayout(container)
+        c_layout.setContentsMargins(20, 20, 20, 20)
+        c_layout.setAlignment(Qt.AlignCenter)
+        
+        icon_lbl = QLabel("⏳")
+        icon_lbl.setFont(QFont("Arial", 36))
+        icon_lbl.setAlignment(Qt.AlignCenter)
+        c_layout.addWidget(icon_lbl)
+        
+        title = QLabel("ĐANG CHỜ TRUNG TÂM QUẢN LÝ DUYỆT")
+        title.setFont(QFont("Arial", 14, QFont.Bold))
+        title.setStyleSheet("color: #ea580c; border: none; margin-bottom: 5px;")
+        title.setAlignment(Qt.AlignCenter)
+        c_layout.addWidget(title)
+        
+        msg = QLabel(f"Tài xế: {driver_name}\nVui lòng chờ Trung tâm Quản lý xác nhận phiên làm việc cũ.\n(Agree = Tiếp tục  |  Disagree = Đăng nhập lại)")
+        msg.setFont(QFont("Arial", 11))
+        msg.setStyleSheet("color: #475569; border: none;")
+        msg.setAlignment(Qt.AlignCenter)
+        msg.setWordWrap(True)
+        c_layout.addWidget(msg)
+
+        # Spinner/status label — updated by server response
+        self.status_lbl = QLabel("● Đang chờ phản hồi từ Server...")
+        self.status_lbl.setFont(QFont("Arial", 10))
+        self.status_lbl.setStyleSheet("color: #94a3b8; border: none; margin-top: 8px;")
+        self.status_lbl.setAlignment(Qt.AlignCenter)
+        c_layout.addWidget(self.status_lbl)
+
+        # NOTE: No close/dismiss button — driver CANNOT close this dialog manually
+        # It will be closed by _handle_vehicle_status_ack when server sends session_state=2 or 3
+        
+        main_layout.addWidget(container)
+
+    def server_approved(self):
+        """Called when server sends session_state=2 (Agree) — auto-close"""
+        self.status_lbl.setText("✓ Trung tâm đã ĐỒNG Ý — Đang đăng nhập...")
+        self.status_lbl.setStyleSheet("color: #16a34a; border: none; font-weight: bold; margin-top: 8px;")
+        QTimer.singleShot(800, self.accept)
+
+    def server_rejected(self):
+        """Called when server sends session_state=3 (Disagree) — auto-close"""
+        self.status_lbl.setText("✕ Trung tâm đã TỪ CHỐI — Vui lòng đăng nhập lại.")
+        self.status_lbl.setStyleSheet("color: #dc2626; border: none; font-weight: bold; margin-top: 8px;")
+        QTimer.singleShot(1200, self.reject)
+
+# Custom Dialog Popup for Driver Logout with Camera Frame Alignment (Slide 11 design_do_an.pdf)
+class DriverLogoutDialog(QDialog):
+    def __init__(self, camera_service, auth_service, parent=None):
+        super().__init__(parent)
+        self.camera = camera_service
+        self.auth = auth_service
+        self.setWindowTitle("XÁC THỰC KHUÔN MẶT ĐĂNG XUẤT")
+        self.setFixedSize(520, 480)
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(15, 15, 15, 15)
+        
+        container = QFrame()
+        container.setStyleSheet("background-color: #ffffff; border: 3px solid #ea580c; border-radius: 20px;")
+        c_layout = QVBoxLayout(container)
+        c_layout.setContentsMargins(20, 20, 20, 20)
+        
+        title = QLabel("XÁC THỰC KHUÔN MẶT ĐĂNG XUẤT")
+        title.setFont(QFont("Arial", 14, QFont.Bold))
+        title.setStyleSheet("color: #ea580c; border: none; margin-bottom: 5px;")
+        title.setAlignment(Qt.AlignCenter)
+        c_layout.addWidget(title)
+        
+        self.cam_lbl = QLabel()
+        self.cam_lbl.setFixedSize(440, 280)
+        self.cam_lbl.setStyleSheet("background-color: #0f172a; border-radius: 12px; border: 2px solid #ea580c;")
+        self.cam_lbl.setAlignment(Qt.AlignCenter)
+        c_layout.addWidget(self.cam_lbl, alignment=Qt.AlignCenter)
+        
+        btn_box = QHBoxLayout()
+        self.btn_cancel = QPushButton("HỦY BỎ")
+        self.btn_cancel.setFont(QFont("Arial", 12, QFont.Bold))
+        self.btn_cancel.setStyleSheet("background-color: #64748b; color: white; border: none; padding: 12px; border-radius: 10px;")
+        
+        self.btn_confirm = QPushButton("XÁC NHẬN ĐĂNG XUẤT")
+        self.btn_confirm.setFont(QFont("Arial", 12, QFont.Bold))
+        self.btn_confirm.setStyleSheet("background-color: #ea580c; color: white; border: none; padding: 12px; border-radius: 10px;")
+        
+        btn_box.addWidget(self.btn_cancel)
+        btn_box.addWidget(self.btn_confirm)
+        c_layout.addLayout(btn_box)
+        
+        main_layout.addWidget(container)
+        
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.update_frame)
+        self.timer.start(50)
+        
+        self.btn_cancel.clicked.connect(self.reject)
+        self.btn_confirm.clicked.connect(self.do_logout_verify)
+        
+    def update_frame(self):
+        if not self.camera: return
+        frame = self.camera.latest_frame
+        if frame is not None:
+            h, w, ch = frame.shape
+            bytes_per_line = ch * w
+            q_img = QImage(frame.data, w, h, bytes_per_line, QImage.Format_RGB888).rgbSwapped()
+            q_img_draw = QImage(q_img)
+            
+            painter = QPainter(q_img_draw)
+            pen = QPen(QColor(22, 163, 74), 3, Qt.DashLine)
+            painter.setPen(pen)
+            
+            box_w, box_h = int(w * 0.45), int(h * 0.55)
+            box_x, box_y = (w - box_w) // 2, (h - box_h) // 2
+            painter.drawRoundedRect(box_x, box_y, box_w, box_h, 16, 16)
+            
+            painter.setPen(QColor(234, 88, 12))
+            painter.setFont(QFont("Arial", 12, QFont.Bold))
+            painter.drawText(box_x, box_y - 10, "CĂN KHUÔN MẶT ĐỂ ĐĂNG XUẤT")
+            painter.end()
+            
+            pix = QPixmap.fromImage(q_img_draw).scaled(440, 280, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            self.cam_lbl.setPixmap(pix)
+            
+    def do_logout_verify(self):
+        self.timer.stop()
+        vec = self.camera.capture_face_vector()
+        if vec is not None and self.auth.verify_driver_presence(vec):
+            self.accept()
+        else:
+            # F5: 02/003: "Không thể xác nhận khuôn mặt tài xế"
+            parent = self.parent()
+            if hasattr(parent, "uart") and parent.uart:
+                parent.uart.send_frame(0x02, 0x03)
+            QMessageBox.critical(self, "Xác thực thất bại", "Khuôn mặt đăng xuất không khớp với tài xế hiện tại!")
+            self.timer.start(50)
+
+# Custom GPS Map View Canvas Widget for Pi UI
+class GPSMapView(QFrame):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setStyleSheet("background-color: #0f172a; border-radius: 12px; border: 1px solid #334155;")
+        self.lat = 21.003118
+        self.lon = 105.845899
+        self.speed = 0.0
+        
+    def set_location(self, lat, lon, speed):
+        self.lat = lat
+        self.lon = lon
+        self.speed = speed
+        self.update()
+        
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        
+        w, h = self.width(), self.height()
+        
+        # Grid lines (simulate road map grid)
+        pen = QPen(QColor(51, 65, 85), 1, Qt.DotLine)
+        painter.setPen(pen)
+        for x in range(0, w, 40):
+            painter.drawLine(x, 0, x, h)
+        for y in range(0, h, 40):
+            painter.drawLine(0, y, w, y)
+            
+        # Draw main avenue road
+        pen_road = QPen(QColor(71, 85, 105), 24, Qt.SolidLine)
+        painter.setPen(pen_road)
+        painter.drawLine(0, int(h * 0.5), w, int(h * 0.5))
+        painter.drawLine(int(w * 0.4), 0, int(w * 0.4), h)
+        
+        # Road center dash lines
+        pen_dash = QPen(QColor(254, 240, 138), 2, Qt.DashLine)
+        painter.setPen(pen_dash)
+        painter.drawLine(0, int(h * 0.5), w, int(h * 0.5))
+        painter.drawLine(int(w * 0.4), 0, int(w * 0.4), h)
+        
+        # Bus Icon Marker
+        bus_x, bus_y = int(w * 0.4), int(h * 0.5)
+        painter.setBrush(QColor(234, 88, 12))
+        painter.setPen(QPen(QColor(255, 255, 255), 2))
+        painter.drawEllipse(bus_x - 14, bus_y - 14, 28, 28)
+        
+        painter.setPen(QColor(255, 255, 255))
+        painter.setFont(QFont("Arial", 10, QFont.Bold))
+        painter.drawText(bus_x - 10, bus_y + 5, "BUS")
+        
+        # Telemetry Info Overlay Badge
+        painter.setBrush(QColor(15, 23, 42, 220))
+        painter.setPen(QPen(QColor(51, 65, 85), 1))
+        painter.drawRoundedRect(12, 12, 260, 50, 8, 8)
+        
+        painter.setPen(QColor(226, 232, 240))
+        painter.setFont(QFont("Consolas", 10, QFont.Bold))
+        painter.drawText(22, 32, f"GPS: {self.lat:.6f}°N, {self.lon:.6f}°E")
+        painter.drawText(22, 50, f"SPEED: {self.speed:.1f} km/h | MAP: LIVE")
+        txt.setFont(QFont("Arial", 11))
+        txt.setStyleSheet("color: #4b5563; border: none; margin-bottom: 10px;")
+        c_layout.addWidget(txt)
+        
+        btn = QPushButton("ĐÃ HIỂU - CHỜ TRUNG TÂM XÁC NHẬN")
+        btn.setFont(QFont("Arial", 11, QFont.Bold))
+        btn.setStyleSheet("""
+            QPushButton {
+                background-color: #0284c7;
+                color: #ffffff;
+                border: none;
+                border-radius: 12px;
+                padding: 12px;
+            }
+            QPushButton:hover { background-color: #0369a1; }
+        """)
+        btn.clicked.connect(self.accept)
+        c_layout.addWidget(btn)
+        main_layout.addWidget(container)
+
+
+class BusMonitoringApp(QMainWindow):
+    driver_login_ack_signal = pyqtSignal(dict)
+    driver_logout_ack_signal = pyqtSignal(dict)
+    attendant_login_ack_signal = pyqtSignal(dict)
+    attendant_logout_ack_signal = pyqtSignal(dict)
+    server_command_signal = pyqtSignal(dict)
+    vehicle_status_ack_signal = pyqtSignal(dict)
+    student_scan_ack_signal = pyqtSignal(dict)
+    sos_progress_signal = pyqtSignal(float)
+
+    def __init__(self, uart_thread, mqtt_client, camera_service, auth_service, session_manager, boarding_logic, seat_debouncer, payload_handler=None):
+        super().__init__()
+        self.uart = uart_thread
+        self.mqtt = mqtt_client
+        self.camera = camera_service
+        self.auth = auth_service
+        self.session = session_manager
+        self.boarding = boarding_logic
+        self.debouncer = seat_debouncer
+        self.payload_handler = payload_handler
+        
+        self.setWindowTitle(f"SchoolBus Gateway - {config.VEHICLE_ID}")
+        self.resize(1024, 680)
+        
+        self.setStyleSheet("""
+            QMainWindow {
+                background-color: #eef2f5;
+            }
+            QWidget {
+                color: #1f2937;
+                font-family: 'Segoe UI', Arial, sans-serif;
+            }
+            QFrame#cardFrame {
+                background-color: #ffffff;
+                border-radius: 16px;
+                border: 1px solid #dcdfe6;
+            }
+            QLabel {
+                font-size: 13px;
+            }
+            QPushButton#orangeBtn {
+                background-color: #e67e22;
+                border: none;
+                border-radius: 10px;
+                padding: 10px 18px;
+                font-size: 13px;
+                font-weight: bold;
+                color: white;
+            }
+            QPushButton#orangeBtn:hover {
+                background-color: #d35400;
+            }
+            QPushButton#sosTopBtn {
+                background-color: #dc2626;
+                border: none;
+                border-radius: 8px;
+                padding: 6px 16px;
+                font-size: 13px;
+                font-weight: bold;
+                color: white;
+            }
+            QPushButton#sosTopBtn:hover {
+                background-color: #b91c1c;
+            }
+            QPushButton#logoutTopBtn {
+                background-color: #f3f4f6;
+                border: 1px solid #d1d5db;
+                border-radius: 8px;
+                padding: 6px 14px;
+                font-size: 12px;
+                font-weight: bold;
+                color: #374151;
+            }
+            QPushButton#logoutTopBtn:hover {
+                background-color: #e5e7eb;
+            }
+        """)
+
+        self.seat_labels = {}
+        self.latest_seats_state = {str(i): 0 for i in range(1, 17)}
+        self.latest_temp = 21.0
+        self.latest_humid = 60.0
+        self.current_speed = 0.0
+
+        self.central_widget = QWidget()
+        self.setCentralWidget(self.central_widget)
+        self.root_layout = QVBoxLayout(self.central_widget)
+        self.root_layout.setContentsMargins(12, 10, 12, 10)
+        self.root_layout.setSpacing(10)
+        
+        self.build_top_header()
+        
+        self.stack = QStackedWidget()
+        self.root_layout.addWidget(self.stack)
+        
+        self.login_screen = self.build_login_screen()
+        self.stack.addWidget(self.login_screen)
+        
+        self.operating_screen = self.build_operating_screen()
+        self.stack.addWidget(self.operating_screen)
+        
+        self.stack.setCurrentIndex(0)
+
+        self.connect_signals()
+        
+        self.timer = QTimer()
+        self.timer.timeout.connect(self.update_status_labels)
+        self.timer.start(1000)
+
+    def build_top_header(self):
+        header_frame = QFrame()
+        header_frame.setObjectName("cardFrame")
+        header_layout = QHBoxLayout(header_frame)
+        header_layout.setContentsMargins(12, 8, 12, 8)
+        
+        logo_path = os.path.join(config.BASE_DIR, "image", "logo.png")
+        if os.path.exists(logo_path):
+            logo_lbl = QLabel()
+            pix = QPixmap(logo_path).scaledToHeight(40, Qt.SmoothTransformation)
+            logo_lbl.setPixmap(pix)
+            header_layout.addWidget(logo_lbl)
+            
+        title_box = QVBoxLayout()
+        title_box.setSpacing(2)
+        
+        t_row = QHBoxLayout()
+        h_title = QLabel("HỌC VIỆN KÝ THUẬT MẬT MÃ")
+        h_title.setFont(QFont("Arial", 13, QFont.Bold))
+        h_title.setStyleSheet("color: #991b1b;")
+        
+        bus_badge = QLabel("#BUS04")
+        bus_badge.setFont(QFont("Arial", 11, QFont.Bold))
+        bus_badge.setStyleSheet("background-color: #f59e0b; color: white; padding: 2px 8px; border-radius: 4px;")
+        
+        t_row.addWidget(h_title)
+        t_row.addWidget(bus_badge)
+        t_row.addStretch()
+        
+        h_sub = QLabel(f"XE ĐƯA ĐÓN HỌC SINH – BIỂN SỐ: {config.VEHICLE_ID}")
+        h_sub.setFont(QFont("Arial", 9, QFont.Bold))
+        h_sub.setStyleSheet("color: #4b5563;")
+        
+        title_box.addLayout(t_row)
+        title_box.addWidget(h_sub)
+        header_layout.addLayout(title_box)
+        
+        header_layout.addStretch()
+        
+        # Build PNG Image Badges for GNSS, CAM, WIFI, DB
+        self.frame_gnss, self.badge_gnss = make_icon_badge("icongnss.png", "GNSS: OFF", is_active=False)
+        self.frame_cam, self.badge_cam = make_icon_badge("iconcamera.png", "CAM: READY", is_active=True)
+        self.frame_wifi, self.badge_wifi = make_icon_badge("iconwifi.png", "WIFI: CONNECTED", is_active=True)
+        self.frame_db, self.badge_db = make_icon_badge("icondatabase.png", "DB: DISCONNECTED", is_active=False)
+        
+        self.sos_btn = QPushButton("SOS")
+        self.sos_btn.setObjectName("sosTopBtn")
+        self.sos_btn.clicked.connect(self.sos_click)
+        
+        header_layout.addWidget(self.frame_gnss)
+        header_layout.addWidget(self.frame_cam)
+        header_layout.addWidget(self.frame_wifi)
+        header_layout.addWidget(self.frame_db)
+        header_layout.addWidget(self.sos_btn)
+        
+        self.root_layout.addWidget(header_frame)
+
+        # F4: Banner hiển thị tiến độ nhấn giữ nút SOS vật lý (GPIO 27)
+        self.sos_hold_frame = QFrame()
+        self.sos_hold_frame.setStyleSheet("""
+            QFrame {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #dc2626, stop:1 #ea580c);
+                border-radius: 8px;
+                padding: 4px 12px;
+            }
+        """)
+        hold_layout = QHBoxLayout(self.sos_hold_frame)
+        hold_layout.setContentsMargins(8, 4, 8, 4)
+        self.sos_hold_label = QLabel("🚨 ĐANG GIỮ NÚT SOS VẬT LÝ...")
+        self.sos_hold_label.setFont(QFont("Arial", 11, QFont.Bold))
+        self.sos_hold_label.setStyleSheet("color: white;")
+        self.sos_hold_bar = QProgressBar()
+        self.sos_hold_bar.setRange(0, 100)
+        self.sos_hold_bar.setValue(0)
+        self.sos_hold_bar.setTextVisible(False)
+        self.sos_hold_bar.setStyleSheet("""
+            QProgressBar {
+                background-color: rgba(255, 255, 255, 0.3);
+                border-radius: 4px;
+                height: 12px;
+            }
+            QProgressBar::chunk {
+                background-color: #fef08a;
+                border-radius: 4px;
+            }
+        """)
+        hold_layout.addWidget(self.sos_hold_label)
+        hold_layout.addWidget(self.sos_hold_bar, 1)
+        self.sos_hold_frame.hide()
+        self.root_layout.addWidget(self.sos_hold_frame)
+
+    def build_login_screen(self) -> QWidget:
+        page = QWidget()
+        layout = QHBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(12)
+        
+        cam_card = QFrame()
+        cam_card.setObjectName("cardFrame")
+        cam_layout = QVBoxLayout(cam_card)
+        cam_layout.setContentsMargins(15, 15, 15, 15)
+        
+        self.video_label = QLabel()
+        self.video_label.setAlignment(Qt.AlignCenter)
+        self.video_label.setFixedSize(620, 480)
+        self.video_label.setStyleSheet("background-color: #000000; border-radius: 12px; border: 2px solid #1e293b;")
+        
+        cam_hint = QLabel("GIỮ THẲNG ĐẦU TRƯỚC CAMERA")
+        cam_hint.setAlignment(Qt.AlignCenter)
+        cam_hint.setFont(QFont("Arial", 12, QFont.Bold))
+        cam_hint.setStyleSheet("color: #1f2937; margin-top: 8px;")
+        
+        self.login_error_toast = QLabel("LOGIN FAILED - Không khớp khuôn mặt")
+        self.login_error_toast.setStyleSheet("background-color: #dc2626; color: white; padding: 8px 16px; border-radius: 8px; font-weight: bold;")
+        self.login_error_toast.hide()
+        
+        cam_layout.addWidget(self.video_label)
+        cam_layout.addWidget(self.login_error_toast, alignment=Qt.AlignRight)
+        cam_layout.addWidget(cam_hint)
+        
+        layout.addWidget(cam_card, 2)
+        
+        right_card = QFrame()
+        right_card.setObjectName("cardFrame")
+        r_layout = QVBoxLayout(right_card)
+        r_layout.setContentsMargins(20, 20, 20, 20)
+        
+        login_header = QHBoxLayout()
+        h_txt = QLabel("ĐĂNG NHẬP")
+        h_txt.setFont(QFont("Arial", 16, QFont.Bold))
+        h_txt.setStyleSheet("color: #ea580c;")
+        login_header.addWidget(h_txt)
+        login_header.addStretch()
+        r_layout.addLayout(login_header)
+        
+        bus_box = QFrame()
+        bus_box.setStyleSheet("background-color: #fef3c7; border-radius: 16px; padding: 15px;")
+        b_layout = QVBoxLayout(bus_box)
+        b_layout.setAlignment(Qt.AlignCenter)
+        
+        bus_img_path = os.path.join(config.BASE_DIR, "image", "school_bus.png")
+        if os.path.exists(bus_img_path):
+            bus_img_lbl = QLabel()
+            pix = QPixmap(bus_img_path).scaledToHeight(180, Qt.SmoothTransformation)
+            bus_img_lbl.setPixmap(pix)
+            b_layout.addWidget(bus_img_lbl)
+        else:
+            bus_img_lbl = QLabel("SCHOOL BUS")
+            bus_img_lbl.setFont(QFont("Arial", 28, QFont.Bold))
+            bus_img_lbl.setStyleSheet("color: #d97706;")
+            b_layout.addWidget(bus_img_lbl)
+            
+        r_layout.addWidget(bus_box)
+        
+        info_sub = QFrame()
+        info_sub.setStyleSheet("background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 12px;")
+        i_layout = QVBoxLayout(info_sub)
+        i_layout.setAlignment(Qt.AlignCenter)
+        
+        faceid_path = os.path.join(config.BASE_DIR, "image", "icon_faceid.png")
+        if os.path.exists(faceid_path):
+            face_img_lbl = QLabel()
+            pix = QPixmap(faceid_path).scaledToHeight(48, Qt.SmoothTransformation)
+            face_img_lbl.setPixmap(pix)
+            i_layout.addWidget(face_img_lbl, alignment=Qt.AlignCenter)
+            
+        lbl1 = QLabel("Xác thực tài xế")
+        lbl1.setFont(QFont("Arial", 12, QFont.Bold))
+        lbl1.setStyleSheet("color: #1e2937;")
+        lbl2 = QLabel("Nhấn nút bên dưới để quét khuôn mặt")
+        lbl2.setStyleSheet("color: #64748b; font-size: 11px;")
+        
+        i_layout.addWidget(lbl1, alignment=Qt.AlignCenter)
+        i_layout.addWidget(lbl2, alignment=Qt.AlignCenter)
+        r_layout.addWidget(info_sub)
+        
+        r_layout.addStretch()
+        
+        self.login_btn = QPushButton("  ĐĂNG NHẬP")
+        self.login_btn.setObjectName("orangeBtn")
+        self.login_btn.setFont(QFont("Arial", 14, QFont.Bold))
+        self.login_btn.setMinimumHeight(52)
+        if os.path.exists(faceid_path):
+            self.login_btn.setIcon(QIcon(faceid_path))
+            self.login_btn.setIconSize(QSize(26, 26))
+        self.login_btn.clicked.connect(self.driver_login_click)
+        r_layout.addWidget(self.login_btn)
+        
+        layout.addWidget(right_card, 1)
+        return page
+
+    def build_operating_screen(self) -> QWidget:
+        page = QWidget()
+        layout = QHBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(12)
+        
+        left_card = QFrame()
+        left_card.setObjectName("cardFrame")
+        l_layout = QVBoxLayout(left_card)
+        l_layout.setContentsMargins(12, 12, 12, 12)
+        l_layout.setSpacing(10)
+        
+        crew_bar = QHBoxLayout()
+        
+        self.drv_box = QFrame()
+        self.drv_box.setStyleSheet("background-color: #fff7ed; border: 1px solid #ffedd5; border-radius: 10px; padding: 6px 12px;")
+        drv_l = QHBoxLayout(self.drv_box)
+        tx_badge = QLabel("TX")
+        tx_badge.setStyleSheet("background-color: #f97316; color: white; font-weight: bold; border-radius: 4px; padding: 4px 8px;")
+        self.tx_info = QLabel("Chưa đăng nhập\nMã: ---")
+        self.tx_info.setFont(QFont("Arial", 10, QFont.Bold))
+        self.tx_info.setStyleSheet("color: #c2410c;")
+        drv_l.addWidget(tx_badge)
+        drv_l.addWidget(self.tx_info)
+        
+        self.px_box = QFrame()
+        self.px_box.setStyleSheet("background-color: #f0f9ff; border: 1px solid #e0f2fe; border-radius: 10px; padding: 6px 12px;")
+        px_l = QHBoxLayout(self.px_box)
+        px_badge = QLabel("PX")
+        px_badge.setStyleSheet("background-color: #0284c7; color: white; font-weight: bold; border-radius: 4px; padding: 4px 8px;")
+        self.px_info = QLabel("Chưa đăng nhập\nMã: ---")
+        self.px_info.setFont(QFont("Arial", 10, QFont.Bold))
+        self.px_info.setStyleSheet("color: #0369a1;")
+        px_l.addWidget(px_badge)
+        px_l.addWidget(self.px_info)
+        
+        self.logout_btn = QPushButton("↳ Đăng xuất")
+        self.logout_btn.setObjectName("logoutTopBtn")
+        self.logout_btn.clicked.connect(self.driver_logout_click)
+        
+        crew_bar.addWidget(self.drv_box)
+        crew_bar.addWidget(self.px_box)
+        crew_bar.addStretch()
+        crew_bar.addWidget(self.logout_btn)
+        l_layout.addLayout(crew_bar)
+        
+        self.map_container = QFrame()
+        self.map_container.setStyleSheet("background-color: #e2e8f0; border-radius: 14px; border: 1px solid #cbd5e1;")
+        map_c_layout = QVBoxLayout(self.map_container)
+        map_c_layout.setContentsMargins(8, 8, 8, 8)
+        
+        dest_overlay = QFrame()
+        dest_overlay.setStyleSheet("background-color: #ffffff; border-radius: 10px; border: 1px solid #e2e8f0; padding: 8px 14px;")
+        d_o_layout = QHBoxLayout(dest_overlay)
+        
+        self.dest_title_lbl = QLabel("ĐIỂM ĐẾN: Chờ thông tin điểm đón tiếp theo...")
+        self.dest_title_lbl.setFont(QFont("Arial", 12, QFont.Bold))
+        self.dest_title_lbl.setStyleSheet("color: #0f172a;")
+        
+        self.speed_lbl = QLabel("0.0 Km/h")
+        self.speed_lbl.setFont(QFont("Arial", 14, QFont.Bold))
+        self.speed_lbl.setStyleSheet("color: #0284c7;")
+        
+        d_o_layout.addWidget(self.dest_title_lbl)
+        d_o_layout.addStretch()
+        d_o_layout.addWidget(self.speed_lbl)
+        map_c_layout.addWidget(dest_overlay)
+        
+        if WEB_ENGINE_AVAILABLE:
+            self.map_view = QWebEngineView()
+            self.map_view.setStyleSheet("border-radius: 10px;")
+            map_html = f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="utf-8" />
+                <style>
+                    html, body, #map {{ width: 100%; height: 100%; margin: 0; padding: 0; background: #e2e8f0; }}
+                </style>
+                <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+                <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+            </head>
+            <body>
+                <div id="map"></div>
+                <script>
+                    var map = L.map('map').setView([21.003118, 105.845899], 15);
+                    L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
+                        maxZoom: 19, attribution: '© OpenStreetMap'
+                    }}).addTo(map);
+                    
+                    var busIcon = L.icon({{
+                        iconUrl: 'https://cdn-icons-png.flaticon.com/512/3448/3448339.png',
+                        iconSize: [40, 40], iconAnchor: [20, 20]
+                    }});
+                    var marker = L.marker([21.003118, 105.845899], {{icon: busIcon}}).addTo(map);
+                    var routePolyline = null;
+                    
+                    function updateMapLocation(lat, lon, speed) {{
+                        if (!lat || !lon) return;
+                        var newLatLng = new L.LatLng(lat, lon);
+                        marker.setLatLng(newLatLng);
+                        map.panTo(newLatLng);
+                    }}
+
+                    function updateRouteGeometry(coords) {{
+                        if (!coords || coords.length < 2) return;
+                        var latlngs = coords.map(function(c) {{ return [c[1], c[0]]; }});
+                        if (routePolyline) {{
+                            routePolyline.setLatLngs(latlngs);
+                        }} else {{
+                            routePolyline = L.polyline(latlngs, {{
+                                color: '#ea580c',
+                                weight: 5,
+                                opacity: 0.85
+                            }}).addTo(map);
+                        }}
+                    }}
+                </script>
+            </body>
+            </html>
+            """
+            self.map_view.setHtml(map_html)
+            map_c_layout.addWidget(self.map_view)
+        else:
+            self.map_view = GPSMapView()
+            map_c_layout.addWidget(self.map_view)
+            
+        l_layout.addWidget(self.map_container, 3)
+        
+        cards_row = QHBoxLayout()
+        cards_row.setSpacing(10)
+        
+        c1 = QFrame()
+        c1.setStyleSheet("background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 8px;")
+        c1_l = QVBoxLayout(c1)
+        c1_l.setAlignment(Qt.AlignCenter)
+        t1 = QLabel("HỌC SINH TRÊN XE")
+        t1.setFont(QFont("Arial", 11, QFont.Bold))
+        t1.setStyleSheet("color: #ea580c;")
+        self.val_students = QLabel("0 / 14")
+        self.val_students.setFont(QFont("Arial", 18, QFont.Bold))
+        self.val_students.setStyleSheet("color: #16a34a;")
+        c1_l.addWidget(t1, alignment=Qt.AlignCenter)
+        c1_l.addWidget(self.val_students, alignment=Qt.AlignCenter)
+        
+        c2 = QFrame()
+        c2.setStyleSheet("background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 8px;")
+        c2_l = QVBoxLayout(c2)
+        c2_l.setAlignment(Qt.AlignCenter)
+        t2 = QLabel("GIAI ĐOẠN CHUYẾN")
+        t2.setFont(QFont("Arial", 11, QFont.Bold))
+        t2.setStyleSheet("color: #ea580c;")
+        self.val_phase = QLabel("PICK UP")
+        self.val_phase.setFont(QFont("Arial", 16, QFont.Bold))
+        self.val_phase.setStyleSheet("color: #0284c7;")
+        c2_l.addWidget(t2, alignment=Qt.AlignCenter)
+        c2_l.addWidget(self.val_phase, alignment=Qt.AlignCenter)
+        
+        c3 = QFrame()
+        c3.setStyleSheet("background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 8px;")
+        c3_l = QVBoxLayout(c3)
+        c3_l.setAlignment(Qt.AlignCenter)
+        t3 = QLabel("NHIỆT ĐỘ | ĐỘ ẨM")
+        t3.setFont(QFont("Arial", 11, QFont.Bold))
+        t3.setStyleSheet("color: #ea580c;")
+        self.val_dht = QLabel("21 C | 60%")
+        self.val_dht.setFont(QFont("Arial", 16, QFont.Bold))
+        self.val_dht.setStyleSheet("color: #9333ea;")
+        c3_l.addWidget(t3, alignment=Qt.AlignCenter)
+        c3_l.addWidget(self.val_dht, alignment=Qt.AlignCenter)
+        
+        cards_row.addWidget(c1)
+        cards_row.addWidget(c2)
+        cards_row.addWidget(c3)
+        l_layout.addLayout(cards_row)
+        
+        layout.addWidget(left_card, 2)
+        
+        right_card = QFrame()
+        right_card.setObjectName("cardFrame")
+        r_layout = QVBoxLayout(right_card)
+        r_layout.setContentsMargins(15, 15, 15, 15)
+        
+        seats_title = QLabel("SƠ ĐỒ VỊ TRÍ GHẾ NGỒI")
+        seats_title.setFont(QFont("Arial", 13, QFont.Bold))
+        seats_title.setStyleSheet("color: #1e2937; margin-bottom: 5px;")
+        r_layout.addWidget(seats_title)
+        
+        seat_grid_frame = QFrame()
+        seat_grid_frame.setStyleSheet("background-color: #f8fafc; border-radius: 12px; border: 1px solid #e2e8f0; padding: 8px;")
+        sg_layout = QGridLayout(seat_grid_frame)
+        sg_layout.setSpacing(8)
+        
+        for i in range(1, 17):
+            lbl = QLabel(f"G{i}")
+            lbl.setAlignment(Qt.AlignCenter)
+            lbl.setFixedSize(48, 40)
+            lbl.setStyleSheet("background-color: #ffffff; border: 1px solid #cbd5e1; border-radius: 6px; font-weight: bold; font-size: 12px; color: #475569;")
+            self.seat_labels[str(i)] = lbl
+            
+            row = (i - 1) // 4
+            col = (i - 1) % 4
+            sg_layout.addWidget(lbl, row, col)
+            
+        r_layout.addWidget(seat_grid_frame)
+        r_layout.addStretch()
+        
+        legend_frame = QHBoxLayout()
+        lg1 = QLabel("● Tài xế")
+        lg1.setStyleSheet("color: #f97316; font-size: 11px; font-weight: bold;")
+        lg2 = QLabel("● Phụ xe")
+        lg2.setStyleSheet("color: #0284c7; font-size: 11px; font-weight: bold;")
+        lg3 = QLabel("● Học sinh")
+        lg3.setStyleSheet("color: #16a34a; font-size: 11px; font-weight: bold;")
+        lg4 = QLabel("○ Trống")
+        lg4.setStyleSheet("color: #94a3b8; font-size: 11px; font-weight: bold;")
+        
+        legend_frame.addWidget(lg1)
+        legend_frame.addWidget(lg2)
+        legend_frame.addWidget(lg3)
+        legend_frame.addWidget(lg4)
+        r_layout.addLayout(legend_frame)
+        
+        layout.addWidget(right_card, 1)
+        return page
+
+    def log(self, text):
+        logger.info(text)
+
+    def connect_signals(self):
+        self.driver_login_ack_signal.connect(self._handle_driver_login_ack)
+        self.driver_logout_ack_signal.connect(self._handle_driver_logout_ack)
+        self.attendant_login_ack_signal.connect(self._handle_attendant_login_ack)
+        self.attendant_logout_ack_signal.connect(self._handle_attendant_logout_ack)
+        self.server_command_signal.connect(self._handle_server_command)
+        self.vehicle_status_ack_signal.connect(self._handle_vehicle_status_ack)
+        self.student_scan_ack_signal.connect(self._handle_student_scan_ack)
+        self.sos_progress_signal.connect(self._on_sos_progress_updated)
+        
+        self.camera.frame_received.connect(self.update_camera_frame)
+        self.uart.seats_received.connect(self.on_seats_received)
+        self.uart.rfid_received.connect(self.on_rfid_received)
+        self.uart.sos_received.connect(self.on_sos_received)
+        self.uart.sos_cancel_received.connect(self.on_sos_cancel_received)
+        self.uart.dht11_received.connect(self.on_dht11_received)
+        self.uart.gps_received.connect(self.on_gps_received)
+        self.uart.connection_status.connect(self.on_uart_connection_status)
+        # Emit initial default GNSS location at bootup (School geofence lat/lon) to avoid empty UI/Map state
+        self.on_gps_received(config.SCHOOL_GEOFENCE_LAT, config.SCHOOL_GEOFENCE_LON, 0.0)
+
+
+    @pyqtSlot(QImage)
+    def update_camera_frame(self, q_img):
+        if hasattr(self, "video_label") and self.video_label:
+            # Burn dashed green bounding box and top orange label directly into frame
+            q_img_draw = q_img.convertToFormat(QImage.Format_ARGB32)
+            painter = QPainter(q_img_draw)
+            painter.setRenderHint(QPainter.Antialiasing)
+            
+            w, h = q_img_draw.width(), q_img_draw.height()
+            box_w, box_h = int(w * 0.55), int(h * 0.65)
+            x = (w - box_w) // 2
+            y = (h - box_h) // 2 + 10
+            
+            # Dashed Green Bounding Box
+            pen = QPen(QColor("#16a34a"), 4, Qt.DashLine)
+            painter.setPen(pen)
+            painter.drawRoundedRect(x, y, box_w, box_h, 8, 8)
+            
+            # Top Orange Label Box: "CĂN MẶT VÀO KHUNG"
+            lbl_w, lbl_h = 200, 32
+            lbl_x = (w - lbl_w) // 2
+            lbl_y = y - 16
+            
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QColor("#ea580c"))
+            painter.drawRoundedRect(lbl_x, lbl_y, lbl_w, lbl_h, 6, 6)
+            
+            painter.setPen(QColor("#ffffff"))
+            painter.setFont(QFont("Arial", 11, QFont.Bold))
+            painter.drawText(lbl_x, lbl_y, lbl_w, lbl_h, Qt.AlignCenter, "CĂN MẶT VÀO KHUNG")
+            painter.end()
+            
+            pix = QPixmap.fromImage(q_img_draw).scaled(
+                self.video_label.width(),
+                self.video_label.height(),
+                Qt.KeepAspectRatioByExpanding,
+                Qt.SmoothTransformation
+            )
+            self.video_label.setPixmap(pix)
+
+    @pyqtSlot(bool)
+    def on_uart_connection_status(self, connected: bool):
+        """Cập nhật badge DB (STM32) trên header khi UART kết nối / mất kết nối."""
+        if connected:
+            set_badge_active(self.frame_db, self.badge_db, is_active=True, text="STM32: OK")
+        else:
+            set_badge_active(self.frame_db, self.badge_db, is_active=False, text="STM32: OFFLINE")
+
+    @pyqtSlot(dict)
+    def on_seats_received(self, seats_dict):
+
+        processed = self.debouncer.update(seats_dict)
+        if processed:
+            self.latest_seats_state = processed
+            self.boarding.update_seats(processed)
+            self.update_seats_ui(processed)
+            
+            # Đồng bộ số ghế học sinh đang ngồi vào session_manager
+            onboard_count = sum(1 for i in range(3, 17) if processed.get(str(i), 0) == 1)
+            self.session.set_student_count(onboard_count)
+            self.update_status_labels()
+
+            # Gửi trạng thái ghế lên Server (type=13: seat/status)
+            self.mqtt.publish_message(13, {"seats": processed}, priority=0)
+
+    def update_seats_ui(self, seats_dict):
+        for seat_num, status in seats_dict.items():
+            if seat_num in self.seat_labels:
+                lbl = self.seat_labels[seat_num]
+                if seat_num == "1":
+                    lbl.setStyleSheet("background-color: #f97316; color: white; border-radius: 6px; font-weight: bold;")
+                elif seat_num == "2":
+                    lbl.setStyleSheet("background-color: #0284c7; color: white; border-radius: 6px; font-weight: bold;")
+                elif status == 1:
+                    lbl.setStyleSheet("background-color: #16a34a; color: white; border-radius: 6px; font-weight: bold;")
+                else:
+                    lbl.setStyleSheet("background-color: #ffffff; color: #475569; border: 1px solid #cbd5e1; border-radius: 6px; font-weight: bold;")
+
+    @pyqtSlot(str)
+    def on_rfid_received(self, rfid_uid):
+        self.log(f"Quét thẻ RFID (đầu đọc dùng chung): [{rfid_uid}]")
+        
+        # 1. TRƯỜNG HỢP PHỤ XE CHƯA ĐĂNG NHẬP:
+        if self.auth.active_attendant is None:
+            # KIỂM TRA THỨ TỰ: Tài xế bắt buộc phải đăng nhập trước khi phụ xe đăng nhập!
+            if self.auth.active_driver is None:
+                self.log(f"-> TỪ CHỐI ĐĂNG NHẬP PHỤ XE: Tài xế chưa đăng nhập! (Thẻ: [{rfid_uid}])")
+                self.uart.send_frame(0x03, 0x02) # Phụ xe login thất bại
+                dlg = CannotLogoutDialog("Tài xế bắt buộc phải đăng nhập trước khi phụ xe đăng nhập!", self)
+                dlg.setWindowTitle("YÊU CẦU THỨ TỰ ĐĂNG NHẬP")
+                dlg.exec_()
+                return
+
+            self.log(f"-> Phụ xe chưa lên xe: Quẹt thẻ [{rfid_uid}] để đăng nhập phụ xe.")
+            if self.mqtt.is_connected:
+                # Gửi yêu cầu đăng nhập phụ xe lên Server (MQTT type 6)
+                self.mqtt.publish_message(6, {
+                    "rfid_code": rfid_uid
+                }, priority=1)
+            else:
+                # Fallback chế độ ngoại tuyến / chạy mô phỏng không cần Server
+                logger.info("Chế độ Offline: Tự động xác thực đăng nhập phụ xe với thẻ %s", rfid_uid)
+                att_id = "PX" + rfid_uid[-4:]
+                att_name = f"Phụ xe ({rfid_uid[-4:]})"
+                self.session.process_attendant_login(att_id, att_name, rfid_uid)
+                self.update_status_labels()
+                self.log(f"-> Phụ xe đăng nhập thành công (Offline): {att_name} [{att_id}]")
+            return
+
+        # 2. TRƯỜNG HỢP PHỤ XE ĐÃ ĐĂNG NHẬP:
+        active_rfid = self.auth.active_attendant.get("rfid_code", "")
+        # Nếu phụ xe quẹt lại chính thẻ của mình -> YÊU CẦU ĐĂNG XUẤT (Logout)
+        if active_rfid and active_rfid == rfid_uid:
+            # KIỂM TRA ĐIỀU KIỆN ĐĂNG XUẤT PHỤ XE: Phải không còn học sinh nào trên xe!
+            occupied_seats = sum(1 for i in range(3, 17) if self.latest_seats_state.get(str(i), 0) == 1)
+            rfid_students = len(self.boarding.students_onboard)
+            current_students = max(occupied_seats, rfid_students, self.session.students_onboard)
+            
+            can_logout, reason = self.session.can_attendant_logout(current_students)
+            if not can_logout:
+                self.log(f"-> TỪ CHỐI ĐĂNG XUẤT PHỤ XE: {reason}")
+                self.uart.send_frame(0x04, 0x02) # Phụ xe logout thất bại
+                dlg = CannotLogoutDialog(reason, self)
+                dlg.setWindowTitle("KHÔNG THỂ ĐĂNG XUẤT PHỤ XE")
+                dlg.exec_()
+                return
+
+            self.log(f"-> Tất cả học sinh đã xuống xe hết: Phụ xe quẹt lại thẻ [{rfid_uid}] thực hiện đăng xuất.")
+            if self.mqtt.is_connected:
+                self.mqtt.publish_message(8, {
+                    "attendant_id": self.auth.active_attendant.get("attendant_id", ""),
+                    "rfid_code": rfid_uid
+                }, priority=1)
+            else:
+                self.session.process_attendant_logout()
+                self.update_status_labels()
+                self.log("-> Phụ xe đã đăng xuất thành công (Offline).")
+            return
+
+        # 3. NẾU KHÔNG PHẢI THẺ PHỤ XE -> ĐÂY LÀ THẺ HỌC SINH (LÊN HOẶC XUỐNG XE):
+        self.log(f"-> Phụ xe đã có mặt trên xe: Quét thẻ học sinh [{rfid_uid}].")
+        self.boarding.handle_rfid_scan(rfid_uid)
+        self.update_status_labels()
+
+    @pyqtSlot(int)
+    def on_sos_received(self, source=1):
+        self.log(f"🚨 CẢNH BÁO SOS: Nút khẩn cấp vật lý (nguồn={source}) vừa được nhấn kích hoạt!")
+        lat = getattr(self, "latest_lat", 21.0021)
+        lon = getattr(self, "latest_lon", 105.8462)
+        if hasattr(self, "payload_handler") and self.payload_handler:
+            self.payload_handler.trigger_sos(triggered_by=source, lat=lat, lon=lon)
+        dlg = SOSAlertDialog(lat, lon, self)
+        dlg.exec_()
+
+    @pyqtSlot()
+    def on_sos_cancel_received(self):
+        self.log("🚨 HỦY SOS: Tín hiệu hủy khẩn cấp từ Slave (CAN 0x101) đã nhận!")
+        if hasattr(self, "payload_handler") and self.payload_handler:
+            self.payload_handler.cancel_sos()
+
+    @pyqtSlot(float)
+    def _on_sos_progress_updated(self, progress: float):
+        if progress > 0.0:
+            remaining = max(0.0, 3.0 * (1.0 - progress))
+            self.sos_hold_label.setText(f"🚨 ĐANG GIỮ NÚT SOS VẬT LÝ: {int(progress * 100)}% ({remaining:.1f}s)")
+            self.sos_hold_bar.setValue(int(progress * 100))
+            self.sos_hold_frame.show()
+            if progress >= 1.0:
+                self.sos_hold_label.setText("🚨 KÍCH HOẠT SOS THÀNH CÔNG!")
+                # Feedback âm thanh / bíp ngắn xuống Master
+                self.uart.send_frame(0x05, 0x01)
+                QTimer.singleShot(1500, self.sos_hold_frame.hide)
+        else:
+            self.sos_hold_frame.hide()
+            self.sos_hold_bar.setValue(0)
+
+    def on_gpio_login_toggle(self):
+        """F4: Xử lý nút vật lý GPIO 17 (Login/Logout toggle)."""
+        occupied_seats = sum(1 for i in range(3, 17) if self.latest_seats_state.get(str(i), 0) == 1)
+        rfid_students = len(self.boarding.students_onboard)
+        current_students = max(occupied_seats, rfid_students, self.session.students_onboard)
+
+        status, msg = self.session.toggle_login_logout(current_students)
+        if status == "LOCKED":
+            self.log(f"⚠️ Nút GPIO 1 bị khóa: {msg}")
+            if hasattr(self, "login_error_toast"):
+                self.login_error_toast.setText(msg)
+                self.login_error_toast.show()
+        elif status == "LOGIN_REQUEST":
+            self.log("🔑 Nút GPIO 1: Yêu cầu ĐĂNG NHẬP tài xế — Chuyển màn hình nhận diện")
+            self.stack.setCurrentIndex(0)
+            if hasattr(self, "driver_login_click"):
+                self.driver_login_click()
+        elif status == "LOGOUT_REQUEST":
+            self.log("🚪 Nút GPIO 1: Yêu cầu ĐĂNG XUẤT tài xế")
+            self.driver_logout_click()
+        elif status == "REJECTED":
+            self.log(f"❌ Nút GPIO 1: Từ chối đăng xuất ({msg})")
+            dlg = CannotLogoutDialog(msg, self)
+            dlg.setWindowTitle("KHÔNG THỂ ĐĂNG XUẤT TÀI XẾ")
+            dlg.exec_()
+
+    def on_gpio_sos_triggered(self, source=3):
+        """F4: Xử lý nút vật lý GPIO 27 khi đã giữ đủ 3 giây liên tục."""
+        self.log(f"🚨 Nút GPIO SOS kích hoạt (nguồn={source})!")
+        lat = getattr(self, "latest_lat", 21.0021)
+        lon = getattr(self, "latest_lon", 105.8462)
+        if hasattr(self, "payload_handler") and self.payload_handler:
+            self.payload_handler.trigger_sos(triggered_by=source, lat=lat, lon=lon)
+        dlg = SOSAlertDialog(lat, lon, self)
+        dlg.exec_()
+
+    def on_gpio_sos_progress(self, prog: float):
+        """F4: Nhận tiến độ nhấn giữ nút SOS từ thread GPIO và phát signal lên UI."""
+        self.sos_progress_signal.emit(prog)
+
+
+    @pyqtSlot(float, float, float)
+    def on_gps_received(self, lat, lon, speed):
+        self.current_speed = speed
+        self.latest_lat = lat
+        self.latest_lon = lon
+        self.speed_lbl.setText(f"{speed:.1f} Km/h")
+        set_badge_active(self.frame_gnss, self.badge_gnss, is_active=True, text="GNSS: ACTIVE")
+        self.boarding.update_gps(lat, lon, speed)
+        if hasattr(self, "map_view") and self.map_view:
+            if hasattr(self.map_view, "set_location"):
+                self.map_view.set_location(lat, lon, speed)
+            elif WEB_ENGINE_AVAILABLE:
+                self.map_view.page().runJavaScript(f"updateMapLocation({lat:.6f}, {lon:.6f}, {speed:.1f});")
+
+        # Gửi telemetry lên Server (type=14: telemetry)
+        onboard_count = sum(1 for i in range(3, 17) if self.latest_seats_state.get(str(i), 0) == 1)
+        self.mqtt.publish_message(14, {
+            "lat": lat,
+            "lon": lon,
+            "speed_kmh": speed,
+            "students_onboard": onboard_count,
+            "temperature": getattr(self, "latest_temp", 0.0),
+            "humidity": getattr(self, "latest_humid", 0.0)
+        }, priority=0)
+
+    @pyqtSlot(float, float)
+    def on_dht11_received(self, temp, humid):
+        self.latest_temp = temp
+        self.latest_humid = humid
+        self.val_dht.setText(f"{temp:.0f} C | {humid:.0f}%")
+
+    def driver_login_click(self):
+        if getattr(self.session, "is_pending_confirm", False):
+            # F5: 01/003: "Hệ thống đang bận, vui lòng thử lại"
+            self.uart.send_frame(0x01, 0x03)
+            self.login_error_toast.setText("Hệ thống đang chờ trung tâm xác nhận phiên cũ, vui lòng thử lại sau!")
+            self.login_error_toast.show()
+            return
+
+        self.login_btn.setEnabled(False)
+        self.login_btn.setText(" ĐANG QUÉT...")
+        self.login_error_toast.hide()
+        
+        self.login_face_worker = FaceVectorWorker(self.camera)
+        self.login_face_worker.vector_ready.connect(self.on_login_face_captured)
+        self.login_face_worker.start()
+
+    def on_login_face_captured(self, vector):
+        self.login_btn.setText(" ĐĂNG NHẬP")
+        self.login_btn.setEnabled(True)
+        
+        if vector is None:
+            self.uart.send_frame(0x01, 0x02)
+            self.login_error_toast.setText("LOGIN FAILED - Không thấy tài xế")
+            self.login_error_toast.show()
+            return
+            
+        cached_user = self.auth.match_face_offline(vector, "driver")
+        if cached_user and not self.mqtt.is_connected:
+            self.session.process_driver_login(cached_user["user_id"], cached_user["full_name"])
+            self.stack.setCurrentIndex(1)
+            self.update_status_labels()
+            return
+            
+        if self.mqtt.is_connected:
+            self._login_vector = vector
+            self.mqtt.publish_message(1, {"face_vector": vector}, priority=1)
+        else:
+            self.login_error_toast.setText("Không có kết nối mạng!")
+            self.login_error_toast.show()
+
+    def driver_logout_click(self):
+        occupied_seats = sum(1 for i in range(3, 17) if self.latest_seats_state.get(str(i), 0) == 1)
+        rfid_students = len(self.boarding.students_onboard)
+        current_students = max(occupied_seats, rfid_students, self.session.students_onboard)
+        
+        can_logout, reason = self.session.can_driver_logout(current_students)
+        if not can_logout:
+            # F5: 02/004: "Đăng xuất thất bại — còn học sinh hoặc phụ xe"
+            self.uart.send_frame(0x02, 0x04)
+            dlg = CannotLogoutDialog(reason, self)
+            dlg.setWindowTitle("KHÔNG THỂ ĐĂNG XUẤT TÀI XẾ")
+            dlg.exec_()
+            return
+            
+        dlg = DriverLogoutDialog(self.camera, self.auth, self)
+        if dlg.exec_() == QDialog.Accepted:
+            if self.mqtt.is_connected:
+                self.mqtt.publish_message(3, {}, priority=1)
+            self.session.process_driver_logout()
+            self.stack.setCurrentIndex(0)
+            self.update_status_labels()
+
+    def sos_click(self):
+        self.log("🚨 Kích hoạt SOS từ màn hình cảm ứng UI (nguồn=2).")
+        lat = getattr(self, "latest_lat", 21.0021)
+        lon = getattr(self, "latest_lon", 105.8462)
+        if hasattr(self, "payload_handler") and self.payload_handler:
+            self.payload_handler.trigger_sos(triggered_by=2, lat=lat, lon=lon)
+        else:
+            self.uart.send_frame(0x07, 0x01)
+            self.mqtt.publish_message(15, {
+                "lat": lat,
+                "lon": lon,
+                "triggered_by": 2,
+                "seat_number": 1
+            }, priority=2)
+        dlg = SOSAlertDialog(lat, lon, self)
+        dlg.exec_()
+
+    def update_status_labels(self):
+        if self.mqtt.is_connected:
+            set_badge_active(self.frame_wifi, self.badge_wifi, is_active=True, text="WIFI: CONNECTED")
+        else:
+            set_badge_active(self.frame_wifi, self.badge_wifi, is_active=False, text="WIFI: DISCONNECTED")
+
+        if self.auth.active_driver:
+            d_name = self.auth.active_driver.get("full_name", "Tài xế")
+            d_id = self.auth.active_driver.get("driver_id", "DR_001")
+            d_lic = self.auth.active_driver.get("license_class", "B2")
+            self.tx_info.setText(f"{d_name}\nMã: {d_id} . Bằng: {d_lic}")
+        else:
+            self.tx_info.setText("Chưa đăng nhập\nMã: ---")
+            
+        if self.auth.active_attendant:
+            att_name = self.auth.active_attendant.get("full_name", "Phụ xe")
+            att_id = self.auth.active_attendant.get("attendant_id", "PX001")
+            self.px_info.setText(f"{att_name}\nMã: {att_id}")
+        else:
+            self.px_info.setText("Chưa đăng nhập\nMã: ---")
+
+        onboard_count = sum(1 for i in range(3, 17) if self.latest_seats_state.get(str(i), 0) == 1)
+        self.val_students.setText(f"{onboard_count} / 14")
+        self.val_phase.setText(getattr(self.boarding, "trip_phase", "PICKUP"))
+
+    # MQTT Callbacks
+    def _handle_driver_login_ack(self, data):
+        res = data.get("result", 0)
+        if res == 1:
+            name = data.get("full_name", "Tài xế")
+            driver_id = data.get("driver_id", "DR_001")
+            phone = data.get("phone_number", "")
+            self.uart.send_frame(0x01, 0x01, driver_id.encode("ascii"))
+            
+            face_vec = getattr(self, "_login_vector", None)
+            if face_vec:
+                self.auth.cache_user_vector(driver_id, "driver", name, face_vec)
+                
+            self.session.process_driver_login(driver_id, name, face_vec, phone_number=phone)
+            self.stack.setCurrentIndex(1)
+            self.update_status_labels()
+        else:
+            # F5: 01/004: "Không thể xác nhận khuôn mặt tài xế" (Server result=0)
+            self.uart.send_frame(0x01, 0x04)
+            self.login_error_toast.setText("LOGIN FAILED - Không thể xác nhận khuôn mặt tài xế")
+            self.login_error_toast.show()
+
+    def _handle_vehicle_status_ack(self, data):
+        session_state = data.get("session_state", 0)
+        set_badge_active(self.frame_db, self.badge_db, is_active=True, text="DB: CONNECTED")
+        
+        if session_state == 1:
+            # Server has existing session — show locked waiting dialog
+            self.session.set_pending_confirm(True)
+            # Avoid opening a second dialog if one is already visible
+            if hasattr(self, "_pending_session_dlg") and self._pending_session_dlg and self._pending_session_dlg.isVisible():
+                return
+            driver_name = data.get("existing_driver_name", data.get("driver_full_name", "Tài xế cũ"))
+            self._pending_session_dlg = SessionCheckDialog(driver_name, self)
+            # show() is non-blocking so Qt event loop continues receiving MQTT
+            self._pending_session_dlg.show()
+
+        elif session_state == 2:
+            # Admin AGREED — close waiting dialog and log in driver
+            self.session.set_pending_confirm(False)
+            dlg = getattr(self, "_pending_session_dlg", None)
+            if dlg is not None:
+                try:
+                    dlg.server_approved()
+                except Exception:
+                    dlg.accept()
+                self._pending_session_dlg = None
+            driver_id = data.get("driver_id")
+            name = data.get("driver_full_name", "Tài xế")
+            phone = data.get("phone_number", "")
+            if driver_id:
+                self.session.process_driver_login(driver_id, name, phone_number=phone)
+                self.stack.setCurrentIndex(1)
+                self.update_status_labels()
+
+        elif session_state == 3:
+            # Admin REJECTED — close dialog and force re-login screen
+            self.session.set_pending_confirm(False)
+            dlg = getattr(self, "_pending_session_dlg", None)
+            if dlg is not None:
+                try:
+                    dlg.server_rejected()
+                except Exception:
+                    dlg.reject()
+                self._pending_session_dlg = None
+            self.session.process_driver_logout()
+            self.stack.setCurrentIndex(0)
+            self.update_status_labels()
+            QMessageBox.warning(self, "Thông báo từ Trung tâm", "Phiên làm việc đã bị Trung tâm Quản lý hủy bỏ. Vui lòng Đăng nhập lại.")
+
+
+    def _handle_student_scan_ack(self, data):
+        next_id = data.get("next_student_id")
+        next_name = data.get("next_student_name", "---")
+        next_addr = data.get("next_address", "---")
+        is_last = data.get("is_last_student_picked", False)
+        onboard = data.get("students_onboard")
+        remaining = data.get("students_remaining", 0)
+        route_geom = data.get("next_route_geometry")
+
+        if hasattr(self, "boarding") and self.boarding:
+            self.boarding.set_last_student_picked(is_last)
+
+        if is_last:
+            self.dest_title_lbl.setText("ĐIỂM ĐẾN: TRƯỜNG HỌC (Đang về trường)")
+            # Phát âm thanh thông báo học sinh cuối cùng đã lên xe (Track 05/003)
+            self.uart.send_frame(0x05, 0x03)
+
+        elif next_id:
+            self.dest_title_lbl.setText(f"ĐIỂM ĐẾN: {next_name} – {next_addr}")
+        else:
+            self.dest_title_lbl.setText(f"ĐIỂM ĐẾN: {next_name} – {next_addr}")
+            phase = getattr(self.boarding, "trip_phase", "PICKUP")
+            if phase == "PICKUP":
+                self.uart.send_frame(0x05, 0x03)
+            elif phase == "DROPOFF":
+                self.uart.send_frame(0x05, 0x04)
+
+        if onboard is not None:
+            self.val_students.setText(f"{onboard} / 14")
+
+        # Cập nhật vẽ tuyến đường động lên bản đồ Leaflet
+        if route_geom and WEB_ENGINE_AVAILABLE and hasattr(self, "map_view") and self.map_view:
+            try:
+                geom_json = json.dumps(route_geom)
+                self.map_view.page().runJavaScript(f"updateRouteGeometry({geom_json});")
+            except Exception as e:
+                logger.warning("Failed to render dynamic route geometry on Leaflet: %s", e)
+
+
+    def _handle_attendant_login_ack(self, data):
+        res = data.get("result", 0)
+        if res == 1:
+            name = data.get("full_name", "Phụ xe")
+            attendant_id = data.get("attendant_id", "PX001")
+            rfid = data.get("rfid_code", "")
+            self.session.process_attendant_login(attendant_id, name, rfid)
+            self.update_status_labels()
+            self.log(f"Phụ xe đăng nhập thành công: {name} [{attendant_id}]")
+        else:
+            self.uart.send_frame(0x03, 0x02)
+            self.log("Phụ xe đăng nhập thất bại (Mã thẻ không hợp lệ)")
+
+    def _handle_attendant_logout_ack(self, data):
+        res = data.get("result", 0)
+        if res == 1:
+            self.session.process_attendant_logout()
+            self.update_status_labels()
+            self.log("Phụ xe đã đăng xuất thành công")
+        else:
+            self.uart.send_frame(0x04, 0x02)
+            self.log("Phụ xe đăng xuất thất bại")
+
+    def _handle_driver_logout_ack(self, data): pass
+
+    def _handle_server_command(self, data):
+        action = data.get("action")
+        if action == "start_stream":
+            port = data.get("stream_port", 8080)
+            url = self.camera.start_streaming(port=port)
+            status = "active" if url else "inactive"
+            self.mqtt.publish_message(20, {
+                "action": "stream_status",
+                "status": status,
+                "stream_url": url or ""
+            }, priority=1)
+        elif action == "stop_stream":
+            self.camera.stop_streaming()
+            self.mqtt.publish_message(20, {
+                "action": "stream_status",
+                "status": "inactive",
+                "stream_url": ""
+            }, priority=1)
+
+    # MQTT Callback Entry Points (called from MQTTClient background thread -> emit Qt signals)
+    def on_driver_login_ack(self, data):
+        self.driver_login_ack_signal.emit(data)
+
+    def on_driver_logout_ack(self, data):
+        self.driver_logout_ack_signal.emit(data)
+
+    def on_attendant_login_ack(self, data):
+        self.attendant_login_ack_signal.emit(data)
+
+    def on_attendant_logout_ack(self, data):
+        self.attendant_logout_ack_signal.emit(data)
+
+    def on_server_command(self, data):
+        self.server_command_signal.emit(data)
+
+    def on_vehicle_status_ack(self, data):
+        self.vehicle_status_ack_signal.emit(data)
+
+    def on_student_scan_ack(self, data):
+        self.student_scan_ack_signal.emit(data)
